@@ -8,7 +8,7 @@ mod schema;
 
 use diesel::prelude::*;
 use juniper::ID;
-use juniper_eager_loading::{prelude::*, EagerLoading, OptionHasOne};
+use juniper_eager_loading::{prelude::*, EagerLoading, HasMany, OptionHasOne};
 use juniper_from_schema::graphql_schema;
 use schema::*;
 
@@ -32,6 +32,11 @@ graphql_schema! {
     }
 
     type Country {
+        id: ID! @juniper(ownership: "owned")
+        cities: [City!]!
+    }
+
+    type City {
         id: ID! @juniper(ownership: "owned")
     }
 }
@@ -104,11 +109,38 @@ impl UserFields for User {
 )]
 pub struct Country {
     country: models::Country,
+
+    #[has_many(root_model_field = "city")]
+    cities: HasMany<City>,
 }
 
 impl CountryFields for Country {
+    fn field_cities(
+        &self,
+        _: &juniper::Executor<'_, Context>,
+        _: &QueryTrail<'_, City, Walked>,
+    ) -> juniper::FieldResult<&Vec<City>> {
+        Ok(self.cities.try_unwrap()?)
+    }
+
     fn field_id(&self, _: &juniper::Executor<'_, Context>) -> juniper::FieldResult<ID> {
         Ok(ID::from(self.country.id))
+    }
+}
+
+#[derive(Clone, EagerLoading)]
+#[eager_loading(
+    connection = "PgConnection",
+    error = "diesel::result::Error",
+    id = "models::CityId"
+)]
+pub struct City {
+    city: models::City,
+}
+
+impl CityFields for City {
+    fn field_id(&self, _: &juniper::Executor<'_, Context>) -> juniper::FieldResult<ID> {
+        Ok(ID::from(self.city.id))
     }
 }
 

@@ -1,33 +1,20 @@
 use crate::schema::*;
-use diesel::backend::Backend;
-use diesel::deserialize;
-use diesel::deserialize::FromSql;
-use diesel::deserialize::FromSqlRow;
-use diesel::deserialize::Queryable;
-use diesel::expression::bound::Bound;
-use diesel::expression::AsExpression;
-use diesel::pg::Pg;
 use diesel::prelude::*;
-use diesel::query_builder::QueryId;
-use diesel::row::Row;
-use diesel::serialize::Output;
-use diesel::serialize::{self, ToSql};
-use diesel::sql_types::HasSqlType;
-use diesel::sql_types::Integer;
-use diesel::sql_types::NotNull;
-use diesel::sql_types::Nullable;
-use diesel::sql_types::SingleValue;
-use std::io::Write;
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct UserId(i32);
 
-diesel_id_newtype!(UserId);
+diesel_id_newtype!(UserId, i32, diesel::sql_types::Integer);
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct CountryId(i32);
 
-diesel_id_newtype!(CountryId);
+diesel_id_newtype!(CountryId, i32, diesel::sql_types::Integer);
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct CityId(i64);
+
+diesel_id_newtype!(CityId, i64, diesel::sql_types::BigInt);
 
 #[derive(Queryable, Clone, Debug, Eq, PartialEq)]
 pub struct User {
@@ -35,8 +22,8 @@ pub struct User {
     pub name: String,
     pub age: i32,
     pub country_id: Option<CountryId>,
-    pub home_city_id: Option<i32>,
-    pub current_city_id: Option<i32>,
+    pub home_city_id: Option<CityId>,
+    pub current_city_id: Option<CityId>,
 }
 
 #[derive(Queryable, Clone, Debug, Eq, PartialEq)]
@@ -45,6 +32,16 @@ pub struct Country {
     pub name: String,
 }
 
+#[derive(Queryable, Clone)]
+pub struct City {
+    pub id: CityId,
+    pub name: String,
+    pub team_association: String,
+    pub association_label: String,
+    pub country_id: CountryId,
+}
+
+
 juniper_eager_loading::impl_load_from_for_diesel! {
     (
         error = diesel::result::Error,
@@ -52,5 +49,7 @@ juniper_eager_loading::impl_load_from_for_diesel! {
     ) => {
         CountryId -> (countries, Country),
         UserId -> (users, User),
+        CityId -> (cities, City),
+        Country.id -> (cities.country_id, City),
     }
 }
