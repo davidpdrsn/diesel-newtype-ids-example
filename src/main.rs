@@ -1,99 +1,115 @@
 #[macro_use]
 extern crate diesel;
 
-use diesel::backend::{self, Backend};
-use diesel::deserialize;
-use diesel::deserialize::FromSql;
-use diesel::expression::Expression;
-use diesel::pg::Pg;
+#[macro_use]
+mod macros;
+mod models;
+mod schema;
+
 use diesel::prelude::*;
-use diesel::sql_types::HasSqlType;
-use diesel::sql_types::Integer;
-use diesel::sql_types::TypeMetadata;
+use juniper::ID;
+use juniper_eager_loading::{prelude::*, EagerLoading, OptionHasOne};
+use juniper_from_schema::graphql_schema;
+use schema::*;
 
-mod schema {
-    table! {
-        use diesel::sql_types::*;
-        use crate::UserId;
+graphql_schema! {
+    schema {
+        query: Query
+        mutation: Mutation
+    }
 
-        users (id) {
-            id -> UserId,
-            name -> Text,
-            age -> Integer,
-            country_id -> Nullable<Integer>,
-            home_city_id -> Nullable<Integer>,
-            current_city_id -> Nullable<Integer>,
-        }
+    type Query {
+        users: [User!]! @juniper(ownership: "owned")
+    }
+
+    type Mutation {
+        noop: Boolean!
+    }
+
+    type User {
+        id: ID! @juniper(ownership: "owned")
+        country: Country
+    }
+
+    type Country {
+        id: ID! @juniper(ownership: "owned")
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
-pub struct UserId(i32);
+pub struct Context;
+impl juniper::Context for Context {}
 
-impl HasSqlType<UserId> for Pg
-where
-    Pg: TypeMetadata + HasSqlType<Integer>,
-{
-    fn metadata(lookup: &Self::MetadataLookup) -> <Pg as TypeMetadata>::TypeMetadata {
-        <Pg as HasSqlType<Integer>>::metadata(lookup)
+pub struct Query;
+
+impl QueryFields for Query {
+    fn field_users(
+        &self,
+        _: &juniper::Executor<'_, Context>,
+        trail: &QueryTrail<'_, User, Walked>,
+    ) -> juniper::FieldResult<Vec<User>> {
+        let con = establish_connection();
+
+        let user_models = users::table.load::<models::User>(&con).unwrap();
+        let mut users = User::from_db_models(&user_models);
+        User::eager_load_all_children_for_each(&mut users, &user_models, &con, trail)?;
+
+        Ok(users)
     }
 }
 
-impl<DB> FromSql<UserId, DB> for i32
-where
-    DB: Backend,
-    i32: FromSql<Integer, DB>,
-{
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
-        i32::from_sql(bytes)
+pub struct Mutation;
+
+impl MutationFields for Mutation {
+    fn field_noop(&self, _: &juniper::Executor<'_, Context>) -> juniper::FieldResult<&bool> {
+        Ok(&true)
     }
 }
 
-impl<ST, DB> Queryable<ST, DB> for UserId
-where
-    DB: Backend,
-    i32: Queryable<ST, DB>,
-{
-    type Row = <i32 as Queryable<ST, DB>>::Row;
+#[derive(Clone, EagerLoading)]
+#[eager_loading(
+    connection = "PgConnection",
+    error = "diesel::result::Error",
+    id = "models::UserId"
+)]
+pub struct User {
+    user: models::User,
 
-    fn build(row: Self::Row) -> Self {
-        UserId(i32::build(row))
+    #[option_has_one(
+        foreign_key_field = "country_id",
+        root_model_field = "country",
+        graphql_field = "country"
+    )]
+    country: OptionHasOne<Country>,
+}
+
+impl UserFields for User {
+    fn field_id(&self, _: &juniper::Executor<'_, Context>) -> juniper::FieldResult<ID> {
+        Ok(ID::from(self.user.id))
+    }
+
+    fn field_country(
+        &self,
+        _: &juniper::Executor<'_, Context>,
+        _: &QueryTrail<'_, Country, Walked>,
+    ) -> juniper::FieldResult<&Option<Country>> {
+        Ok(self.country.try_unwrap()?)
     }
 }
 
-#[derive(Queryable, Debug, Eq, PartialEq)]
-struct User {
-    id: UserId,
-    name: String,
-    age: i32,
-    country_id: Option<i32>,
-    home_city_id: Option<i32>,
-    current_city_id: Option<i32>,
+#[derive(Clone, EagerLoading)]
+#[eager_loading(
+    connection = "PgConnection",
+    error = "diesel::result::Error",
+    id = "models::CountryId"
+)]
+pub struct Country {
+    country: models::Country,
 }
 
-fn main() {
-    use schema::users;
-
-    let con = establish_connection();
-
-    diesel::insert_into(users::table)
-        .values((users::name.eq("Bob"), users::age.eq(30)))
-        .execute(&con)
-        .unwrap();
-
-    let users = users::table
-        .select(users::all_columns)
-        .load::<User>(&con)
-        .unwrap();
-
-    assert_eq!(1, users.len());
-
-    // let user = users::table
-    //     .filter(users::id.eq(users[0].id))
-    //     .first::<User>(&con)
-    //     .unwrap();
-
-    // assert_eq!(vec![user], users);
+impl CountryFields for Country {
+    fn field_id(&self, _: &juniper::Executor<'_, Context>) -> juniper::FieldResult<ID> {
+        Ok(ID::from(self.country.id))
+    }
 }
 
 fn establish_connection() -> PgConnection {
@@ -102,3 +118,5 @@ fn establish_connection() -> PgConnection {
     con.begin_test_transaction().unwrap();
     con
 }
+
+fn main() {}

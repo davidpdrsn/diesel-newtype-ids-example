@@ -6,3 +6,6 @@ edition = "2018"
 
 [dependencies]
 diesel = { version = "1.4.2", features = ["postgres"] }
+juniper = "0.12"
+juniper-from-schema = "0.3.0"
+juniper-eager-loading = "0.2.0"
